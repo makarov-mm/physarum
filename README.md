@@ -8,7 +8,7 @@ fills the volume. The trail field is drawn with a **volumetric ray-marcher** so
 you fly through a glowing 3D network, not a flat slice.
 
 ## Screenshot
-![Screenshot](screenshot.png)  
+![Screenshot](screenshot1.png)  
 
 ## Highlights
 
