@@ -1,14 +1,15 @@
 // Physarum 3D - native Win32/OpenGL viewer for the Visual Studio solution.
 //
 // Two render modes:
-//   Volume  (default) - ray-marches the trail field as a glowing volume.
+//   Volume  (default) - ray-marches the trail field as a glowing volume with
+//                       gradient-based shading, so the veins read as 3D tubes.
 //   Points            - draws the agents as additive sprites (fallback / compare).
 //
 // No GLFW/GLAD: the .sln builds in Visual Studio with no external dependencies.
 //
 // Controls:
 //   left-drag   orbit camera          mouse wheel  zoom
-//   V / P       volume / points mode   Space        pause
+//   V / P       volume / points mode   L            shading on / off
 //   [ / ]       exposure (volume)      - / =        ray steps (volume)
 //   Up/Down     simulation speed       R            reset      Esc  quit
 
@@ -221,7 +222,7 @@ out vec4 frag;
 uniform sampler3D uVolume;
 uniform vec3 uEye, uForward, uRight, uUp;
 uniform float uTanHalf, uAspect, uGrid;
-uniform float uDensityScale, uExposure, uAbsorption;
+uniform float uDensityScale, uExposure, uAbsorption, uShade;
 uniform int uSteps;
 
 void main(){
@@ -242,12 +243,19 @@ void main(){
     tNear = max(tNear, 0.0);
 
     float dt = (tFar - tNear) / float(uSteps);
+    // per-pixel jitter on the ray start removes slice (wood-grain) banding
+    float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    float t = tNear + dt * jitter;
+
+    const vec3 L = normalize(vec3(0.4, 0.85, 0.5));   // key light
+    float texel = 1.0 / uGrid;
+
     vec3 col = vec3(0.0);
     float alpha = 0.0;
-    float t = tNear + dt * 0.5;
     for (int i = 0; i < 512; ++i) {
         if (i >= uSteps) break;
-        vec3 uvw = (ro + rd * t) / uGrid;
+        vec3 p = ro + rd * t;
+        vec3 uvw = p / uGrid;
         float raw = texture(uVolume, uvw).r;
         float d = clamp(raw * uDensityScale, 0.0, 1.0);
         if (d > 0.002) {
@@ -256,8 +264,23 @@ void main(){
             vec3 c3 = vec3(0.90, 1.00, 0.92);   // hot white-green
             vec3 tc = mix(c1, c2, smoothstep(0.0, 0.45, d));
             tc = mix(tc, c3, smoothstep(0.45, 1.0, d));
+
+            vec3 lit = tc;
+            if (uShade > 0.5 && d > 0.04) {
+                // central-difference gradient -> outward surface normal
+                vec3 grad = vec3(
+                    texture(uVolume, uvw + vec3(texel,0,0)).r - texture(uVolume, uvw - vec3(texel,0,0)).r,
+                    texture(uVolume, uvw + vec3(0,texel,0)).r - texture(uVolume, uvw - vec3(0,texel,0)).r,
+                    texture(uVolume, uvw + vec3(0,0,texel)).r - texture(uVolume, uvw - vec3(0,0,texel)).r);
+                if (dot(grad, grad) > 1e-8) {
+                    vec3 n = normalize(-grad);
+                    float diff = max(dot(n, L), 0.0);
+                    float rim = pow(1.0 - max(dot(n, normalize(uEye - p)), 0.0), 2.0);
+                    lit = tc * (0.35 + 0.75 * diff) + vec3(0.6, 0.9, 1.0) * (rim * 0.25);
+                }
+            }
             float a = 1.0 - exp(-d * uAbsorption * dt);
-            vec3 emit = tc * d * uExposure;
+            vec3 emit = lit * d * uExposure;
             col += (1.0 - alpha) * emit * a;
             alpha += (1.0 - alpha) * a;
             if (alpha > 0.992) break;
@@ -405,6 +428,7 @@ struct ViewerState {
     bool dragging = false;
     bool paused = false;
     bool volumeMode = true;
+    bool shade = true;
     double lastX = 0.0;
     double lastY = 0.0;
     int substeps = 1;
@@ -577,6 +601,7 @@ static void renderVolume(ViewerState& s) {
     glUniform1f_(glGetUniformLocation_(s.volProgram, "uDensityScale"), densityScale);
     glUniform1f_(glGetUniformLocation_(s.volProgram, "uExposure"), s.exposure);
     glUniform1f_(glGetUniformLocation_(s.volProgram, "uAbsorption"), 2.5f);
+    glUniform1f_(glGetUniformLocation_(s.volProgram, "uShade"), s.shade ? 1.0f : 0.0f);
     glUniform1i_(glGetUniformLocation_(s.volProgram, "uSteps"), s.raySteps);
     glBindVertexArray_(s.volVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -620,7 +645,8 @@ static void renderHUD(ViewerState& s) {
     std::snprintf(buf, sizeof(buf), "fps %.0f", s.fps);
     lines.emplace_back(buf);
     if (s.volumeMode)
-        std::snprintf(buf, sizeof(buf), "volume  %d^3  steps %d  exp %.1f", s.gridN, s.raySteps, s.exposure);
+        std::snprintf(buf, sizeof(buf), "volume  %d^3  steps %d  exp %.1f  shade %s",
+                      s.gridN, s.raySteps, s.exposure, s.shade ? "on" : "off");
     else
         std::snprintf(buf, sizeof(buf), "points  %.1fM agents", s.sim->agentCount() / 1.0e6);
     lines.emplace_back(buf);
@@ -628,6 +654,7 @@ static void renderHUD(ViewerState& s) {
     lines.emplace_back(buf);
     lines.emplace_back("");
     lines.emplace_back("V / P    volume / points");
+    lines.emplace_back("L        shading on / off");
     lines.emplace_back("[ / ]    exposure");
     lines.emplace_back("- / =    ray steps");
     lines.emplace_back("up / dn  sim speed");
@@ -790,6 +817,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             case VK_DOWN:  s->substeps = std::max(s->substeps - 1, 1); break;
             case 'V':      s->volumeMode = true; break;
             case 'P':      s->volumeMode = false; break;
+            case 'L':      s->shade = !s->shade; break;
             case 'R':      resetSimulation(*s); break;
             case VK_OEM_4: s->exposure = std::max(0.2f, s->exposure - 0.2f); break;   // [
             case VK_OEM_6: s->exposure = std::min(8.0f, s->exposure + 0.2f); break;   // ]
