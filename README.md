@@ -35,15 +35,24 @@ you fly through a glowing 3D network, not a flat slice.
 
 1. Open `PhysarumViewer.sln` in **Visual Studio 2022**.
 2. Select **Release | x64**.
-3. Run with **Ctrl+F5** (Release — Debug is far too slow for ~1.2M agents plus a
+3. Make sure **PhysarumViewer** is the startup project (it is by default), then
+   run with **Ctrl+F5** (Release — Debug is far too slow for ~1.2M agents plus a
    per-frame volume ray-march).
 
-Run on a machine with real GPU drivers (OpenGL 3.3+); it will not work over
-Remote Desktop. If Visual Studio reports the **v143** toolset is missing,
+The solution holds two projects:
+
+- **PhysarumViewer** — the interactive Win32/OpenGL viewer (this is what you run).
+- **PhysarumVerify** — a small console app that runs the headless core checks
+  described under [Verification](#verification). Right-click it → *Set as Startup
+  Project* to run those instead, or use `build_verify.bat` (see below).
+
+Run the viewer on a machine with real GPU drivers (OpenGL 3.3+); it will not work
+over Remote Desktop. If Visual Studio reports the **v143** toolset is missing,
 right-click the solution → *Retarget solution* and pick your installed toolset.
 
-There is no CMake build here; the project is Windows-only by design (native
-Win32 windowing + WGL context).
+There is no CMake build here; the viewer is Windows-only by design (native
+Win32 windowing + WGL context). The core itself is plain C++20 and also compiles
+on Linux/macOS — see the build line in [Verification](#verification).
 
 ## Controls
 
@@ -57,6 +66,7 @@ Win32 windowing + WGL context).
 | `-` / `=` | Ray steps — quality vs. speed (volume) |
 | `Space` | Pause / resume |
 | `Up` / `Down` | Simulation speed (substeps per frame) |
+| `H` | Hide / show the on-screen UI (clean view for screenshots) |
 | `R` | Reset |
 | `Esc` | Quit |
 
@@ -108,6 +118,34 @@ development the 3D field was also projected to 2D (maximum-intensity
 projection) to confirm visually that a connected network forms rather than a
 blob.
 
+**Run it** with either:
+
+- Visual Studio — set **PhysarumVerify** as the startup project and press
+  **Ctrl+F5**; or
+- `build_verify.bat` from any command prompt (it finds the MSVC toolchain
+  itself); or
+- directly on any platform, since the core has no Windows dependencies:
+
+  ```
+  g++ -std=c++20 -O2 -pthread -Isrc src/verify.cpp src/physarum.cpp -o verify
+  ```
+
+A representative run (80³ grid, 400k agents):
+
+```
+    step   field mean   max     CV (structure)   hot%
+      50      34.98      785.6     1.57           8.4
+     100      35.16     1232.1     2.42           8.6
+     150      35.16     1711.1     3.03           8.1
+     200      35.16     2706.3     3.63           7.3
+     250      35.16     3504.1     4.27           6.6
+```
+
+The field mean holds flat (deposit balances decay — the network is in steady
+state), the CV climbs as veins sharpen against empty space, and only a single-
+digit percentage of cells stay "hot": a thin reticulated network, exactly what
+the model should produce.
+
 ## Tuning
 
 The behaviour lives in `PhysarumParams` (`src/physarum.hpp`):
@@ -124,6 +162,10 @@ The behaviour lives in `PhysarumParams` (`src/physarum.hpp`):
 ## Project layout
 
 ```
+PhysarumViewer.sln       VS 2022 solution (both projects below)
+PhysarumViewer.vcxproj   the interactive viewer
+PhysarumVerify.vcxproj   the headless core check
+build_verify.bat         build + run the core check without the IDE
 src/
   vec3.hpp         3D vector maths
   mat4.hpp         matrices + orbit camera

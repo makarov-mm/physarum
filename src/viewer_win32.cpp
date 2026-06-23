@@ -12,6 +12,7 @@
 //   V / P       volume / points mode   L            shading on / off
 //   [ / ]       exposure (volume)      - / =        ray steps (volume)
 //   Up/Down     simulation speed       R            reset      Esc  quit
+//   H           hide / show the UI
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -429,6 +430,7 @@ struct ViewerState {
     bool paused = false;
     bool volumeMode = true;
     bool shade = true;
+    bool showHud = true;
     double lastX = 0.0;
     double lastY = 0.0;
     int substeps = 1;
@@ -659,6 +661,7 @@ static void renderHUD(ViewerState& s) {
     lines.emplace_back("- / =    ray steps");
     lines.emplace_back("up / dn  sim speed");
     lines.emplace_back("space    pause");
+    lines.emplace_back("H        hide UI");
     lines.emplace_back("R        reset");
     lines.emplace_back("drag / wheel  orbit / zoom");
     lines.emplace_back("esc      quit");
@@ -740,7 +743,7 @@ static void renderFrame(ViewerState& s) {
     if (s.volumeMode) renderVolume(s);
     else renderPoints(s);
 
-    renderHUD(s);
+    if (s.showHud) renderHUD(s);
 
     SwapBuffers(s.hdc);
 
@@ -818,6 +821,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             case 'V':      s->volumeMode = true; break;
             case 'P':      s->volumeMode = false; break;
             case 'L':      s->shade = !s->shade; break;
+            case 'H':      s->showHud = !s->showHud; break;
             case 'R':      resetSimulation(*s); break;
             case VK_OEM_4: s->exposure = std::max(0.2f, s->exposure - 0.2f); break;   // [
             case VK_OEM_6: s->exposure = std::min(8.0f, s->exposure + 0.2f); break;   // ]
